@@ -51,7 +51,7 @@ Telegram::Bot::Client.run(token) do |bot|
       bot.api.send_message(chat_id: message.chat.id, text: "Buenas noches a todos")
     end
     # TODO: Read commands properly from MessageEntities
-    if message.text.start_with?('/meme')
+    if message.text and message.text.start_with?('/meme')
       source = message.text.split(' ')[1] || 'r/hmmm'
       begin
         meme = reddit.get_meme(source)
