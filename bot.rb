@@ -20,6 +20,25 @@ def get_memes
   meme_image_urls
 end
 
+def read_stats(file_name)
+  if (File.exist?(file_name))
+    puts "Reading stats: #{file_name}"
+    file = File.open(file_name, 'r')
+    result = Marshal.load file.read
+    file.close
+    puts "Read successfully, stats: #{result}"
+    result
+  end
+end
+
+def write_stats(stats, file_name)
+  puts "Writing stats: #{file_name}"
+  marshal_dump = Marshal.dump(stats)
+  file = File.new(file_name,'w')
+  file.write marshal_dump
+  file.close
+end
+
 class Reddit
   def initialize
     @memes = {}
@@ -38,8 +57,7 @@ class Reddit
       # Let's keep a hash of the latest memes, so we don't repeat ourselves
       meme_hash = Digest::SHA1.hexdigest memes.sort.to_s
       if @meme_hashes[subreddit] && @meme_hashes[subreddit] == meme_hash
-        # No new memes, so an empty array here.
-        @memes[subreddit] = []
+        # No new memes, so nothing to do.
       else
         @memes[subreddit] = memes
         @meme_hashes[subreddit] = meme_hash
@@ -62,31 +80,44 @@ no_meme_memes = [
   'https://memegenerator.net/img/images/71690444.jpg'
 ]
 
-Telegram::Bot::Client.run(token) do |bot|
-  bot.listen do |message|
-    case message.text
-    when '/start'
-      bot.api.send_message(chat_id: message.chat.id, text: "Hola #{message.from.first_name}")
-    when '/stop'
-      bot.api.send_message(chat_id: message.chat.id, text: "Buenas noches a todos")
-    end
-    # TODO: Read commands properly from MessageEntities
-    if message.text and message.text.start_with?('/meme')
-      source = message.text.split(' ')[1] || 'r/hmmm'
-      begin
-        meme = reddit.get_meme(source)
-        if !meme
-          puts 'Meme not found, defaulting'
-          meme = no_meme_memes.sample
-          source = "Se acabaron los memes de #{source}, #{message.from.first_name}. Intenta otro reddit."
-        end
-      rescue => e
-        puts "Something went wrong, BSODing, #{e}"
-        meme = 'http://media02.hongkiat.com/thumbs/640x410/blue-screen-of-death.jpg'
-        source = "cuek. intenta otro reddit #{message.from.first_name}"
+requests_per_source_file = 'requests_per_source_v1'
+
+# Read stats
+requests_per_source = read_stats(requests_per_source_file) || Hash.new(0)
+
+begin
+  puts 'Starting...'
+  Telegram::Bot::Client.run(token) do |bot|
+    bot.listen do |message|
+      case message.text
+      when '/start'
+        bot.api.send_message(chat_id: message.chat.id, text: "Hola #{message.from.first_name}")
+      when '/stop'
+        bot.api.send_message(chat_id: message.chat.id, text: "Buenas noches a todos")
+      when '/stats'
+        bot.api.send_message(chat_id: message.chat.id, text: "Stats: #{requests_per_source.sort_by(&:last).reverse.to_h}")
       end
-      puts "Sending meme #{meme}, caption #{source}"
-      bot.api.send_photo(chat_id: message.chat.id, photo: meme, caption: source)
+      # TODO: Read commands properly from MessageEntities
+      if message.text and message.text.start_with?('/meme')
+        source = message.text.split(' ')[1] || 'r/hmmm'
+        begin
+          requests_per_source[source] = requests_per_source[source] + 1
+          meme = reddit.get_meme(source)
+          if !meme
+            puts 'Meme not found, defaulting'
+            meme = no_meme_memes.sample
+            source = "Se acabaron los memes de #{source}, #{message.from.first_name}. Intenta otro reddit."
+          end
+        rescue => e
+          puts "Something went wrong, BSODing, #{e}"
+          meme = 'http://media02.hongkiat.com/thumbs/640x410/blue-screen-of-death.jpg'
+          source = "cuek. intenta otro reddit #{message.from.first_name}"
+        end
+        puts "Sending meme #{meme}, caption #{source}"
+        bot.api.send_photo(chat_id: message.chat.id, photo: meme, caption: source)
+      end
     end
   end
+ensure
+  write_stats requests_per_source, requests_per_source_file
 end
