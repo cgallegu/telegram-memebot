@@ -6,6 +6,7 @@ require 'json'
 require 'faraday'
 require 'pry'
 require 'rb-readline'
+require 'digest'
 
 token = ENV['TELEGRAM_MEMEBOT_TOKEN']
 
@@ -22,6 +23,7 @@ end
 class Reddit
   def initialize
     @memes = {}
+    @meme_hashes = {}
   end
   def get_meme(subreddit)
     if !@memes[subreddit] or @memes[subreddit].empty?
@@ -32,7 +34,16 @@ class Reddit
         raise "got status code #{response.status} from #{url}"
       end
       memes_raw = JSON.parse(response.body)
-      @memes[subreddit] = memes_raw['data']['children'].map { |e| e['data']['url'] }.select { |e| e.end_with?('jpg', 'png', 'gif') }
+      memes = memes_raw['data']['children'].map { |e| e['data']['url'] }.select { |e| e.end_with?('jpg', 'png', 'gif') }
+      # Let's keep a hash of the latest memes, so we don't repeat ourselves
+      meme_hash = Digest::SHA1.hexdigest memes.sort.to_s
+      if @meme_hashes[subreddit] && @meme_hashes[subreddit] == meme_hash
+        # No new memes, so an empty array here.
+        @memes[subreddit] = []
+      else
+        @memes[subreddit] = memes
+        @meme_hashes[subreddit] = meme_hash
+      end
     end
 
     # Might not be that efficient, but we want memes _now_
@@ -41,6 +52,15 @@ class Reddit
 end
 
 reddit = Reddit.new
+# Nice source of "empty" memes.
+# TODO: pick ones with a reasonable resolution.
+no_meme_memes = [
+  'http://tv90s.com/wp-content/uploads/2018/03/soundgarden-black-hole-sun-official-music-video.jpg',
+  'https://www.dailydot.com/wp-content/uploads/2018/09/farquaad_markiplier_e_meme-409x400.jpg',
+  'https://i.redd.it/b6i7pfzhgy0z.jpg',
+  'https://www.meme-arsenal.com/memes/7a439222553a528730a5a1fd5f046c1f.jpg',
+  'https://memegenerator.net/img/images/71690444.jpg'
+]
 
 Telegram::Bot::Client.run(token) do |bot|
   bot.listen do |message|
@@ -57,11 +77,11 @@ Telegram::Bot::Client.run(token) do |bot|
         meme = reddit.get_meme(source)
         if !meme
           puts 'Meme not found, defaulting'
-          meme = 'http://tv90s.com/wp-content/uploads/2018/03/soundgarden-black-hole-sun-official-music-video.jpg'
-          source = "Niun meme ahi, #{message.from.first_name}"
+          meme = no_meme_memes.sample
+          source = "Se acabaron los memes de #{source}, #{message.from.first_name}. Intenta otro reddit."
         end
-      rescue
-        puts 'Something went wrong, BSODing'
+      rescue => e
+        puts "Something went wrong, BSODing, #{e}"
         meme = 'http://media02.hongkiat.com/thumbs/640x410/blue-screen-of-death.jpg'
         source = "cuek. intenta otro reddit #{message.from.first_name}"
       end
