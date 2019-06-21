@@ -80,6 +80,17 @@ no_meme_memes = [
   'https://memegenerator.net/img/images/71690444.jpg'
 ]
 
+default_sources = [
+  'r/hmmm',
+  'r/funny',
+  'r/me_irl',
+  'r/trebuchetmemes',
+  'r/dankmemes',
+  'r/wholesomememes',
+  'r/itsaunixsystem',
+  'r/softwaregore'
+]
+
 requests_per_source_file = 'requests_per_source_v1'
 
 # Read stats
@@ -99,7 +110,7 @@ begin
       end
       # TODO: Read commands properly from MessageEntities
       if message.text and message.text.start_with?('/meme')
-        source = message.text.split(' ')[1] || 'r/hmmm'
+        source = message.text.split(' ')[1] || default_sources.sample
         begin
           requests_per_source[source] = requests_per_source[source] + 1
           meme = reddit.get_meme(source)
