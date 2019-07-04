@@ -20,23 +20,38 @@ def get_memes
   meme_image_urls
 end
 
-def read_stats(file_name)
-  if (File.exist?(file_name))
-    puts "Reading stats: #{file_name}"
-    file = File.open(file_name, 'r')
-    result = Marshal.load file.read
-    file.close
-    puts "Read successfully, stats: #{result}"
-    result
+class Stats
+  def initialize(file_name)
+    @file_name = file_name
+    @stats = read() || Hash.new(0)
   end
-end
 
-def write_stats(stats, file_name)
-  puts "Writing stats: #{file_name}"
-  marshal_dump = Marshal.dump(stats)
-  file = File.new(file_name,'w')
-  file.write marshal_dump
-  file.close
+  def read
+    if (File.exist?(@file_name))
+      puts "Reading stats: #{@file_name}"
+      file = File.open(@file_name, 'r')
+      result = Marshal.load file.read
+      file.close
+      puts "Read successfully, stats: #{result}"
+      result
+    end
+  end
+
+  def write
+    puts "Writing stats: #{@file_name}"
+    marshal_dump = Marshal.dump(@stats)
+    file = File.new(@file_name,'w')
+    file.write marshal_dump
+    file.close
+  end
+
+  def to_s
+    @stats.sort_by(&:last).reverse.to_h
+  end
+
+  def inc(stat)
+    @stats[stat] = @stats[stat] + 1
+  end
 end
 
 class Reddit
@@ -92,9 +107,7 @@ default_sources = [
 ]
 
 requests_per_source_file = 'requests_per_source_v1'
-
-# Read stats
-requests_per_source = read_stats(requests_per_source_file) || Hash.new(0)
+stats = Stats.new(requests_per_source_file)
 
 begin
   puts 'Starting...'
@@ -106,13 +119,13 @@ begin
       when '/stop'
         bot.api.send_message(chat_id: message.chat.id, text: "Buenas noches a todos")
       when '/stats'
-        bot.api.send_message(chat_id: message.chat.id, text: "Stats: #{requests_per_source.sort_by(&:last).reverse.to_h}")
+        bot.api.send_message(chat_id: message.chat.id, text: "Stats: #{stats}")
       end
       # TODO: Read commands properly from MessageEntities
       if message.text and message.text.start_with?('/meme')
         source = message.text.split(' ')[1] || default_sources.sample
         begin
-          requests_per_source[source] = requests_per_source[source] + 1
+          stats.inc(source)
           meme = reddit.get_meme(source)
           if !meme
             puts 'Meme not found, defaulting'
@@ -126,9 +139,10 @@ begin
         end
         puts "Sending meme #{meme}, caption #{source}"
         bot.api.send_photo(chat_id: message.chat.id, photo: meme, caption: source)
+        stats.write
       end
     end
   end
 ensure
-  write_stats requests_per_source, requests_per_source_file
+  stats.write
 end
