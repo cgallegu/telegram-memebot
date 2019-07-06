@@ -7,6 +7,7 @@ require 'faraday'
 require 'pry'
 require 'rb-readline'
 require 'digest'
+require 'logger'
 
 token = ENV['TELEGRAM_MEMEBOT_TOKEN']
 
@@ -21,24 +22,26 @@ def get_memes
 end
 
 class Stats
-  def initialize(file_name)
+  def initialize(file_name, logger)
     @file_name = file_name
+    @logger = logger
+    
     @stats = read() || Hash.new(0)
   end
 
   def read
     if (File.exist?(@file_name))
-      puts "Reading stats: #{@file_name}"
+      @logger.info("Reading stats: #{@file_name}")
       file = File.open(@file_name, 'r')
       result = Marshal.load file.read
       file.close
-      puts "Read successfully, stats: #{result}"
+      @logger.info("Read successfully, stats: #{result}")
       result
     end
   end
 
   def write
-    puts "Writing stats: #{@file_name}"
+    @logger.info("Writing stats: #{@file_name}")
     marshal_dump = Marshal.dump(@stats)
     file = File.new(@file_name,'w')
     file.write marshal_dump
@@ -65,6 +68,7 @@ class Reddit
       url = "https://www.reddit.com/#{subreddit}/top.json"
       response = Faraday.get url
       if response.status != 200
+        loger.warn(response)
         raise "got status code #{response.status} from #{url}"
       end
       memes_raw = JSON.parse(response.body)
@@ -107,10 +111,11 @@ default_sources = [
 ]
 
 requests_per_source_file = 'requests_per_source_v1'
-stats = Stats.new(requests_per_source_file)
+logger = Logger.new(STDOUT)
+stats = Stats.new(requests_per_source_file, logger)
 
 begin
-  puts 'Starting...'
+  logger.info('Starting...')
   Telegram::Bot::Client.run(token) do |bot|
     bot.listen do |message|
       case message.text
@@ -128,21 +133,23 @@ begin
           stats.inc(source)
           meme = reddit.get_meme(source)
           if !meme
-            puts 'Meme not found, defaulting'
+            logger.info('Meme not found, defaulting')
             meme = no_meme_memes.sample
             source = "Se acabaron los memes de #{source}, #{message.from.first_name}. Intenta otro reddit."
           end
         rescue => e
-          puts "Something went wrong, BSODing, #{e}"
+          logger.warn("Something went wrong, BSODing, #{e}")
           meme = 'http://media02.hongkiat.com/thumbs/640x410/blue-screen-of-death.jpg'
           source = "cuek. intenta otro reddit #{message.from.first_name}"
         end
-        puts "Sending meme #{meme}, caption #{source}"
+        logger.info("Sending meme #{meme}, caption #{source}")
         bot.api.send_photo(chat_id: message.chat.id, photo: meme, caption: source)
         stats.write
       end
     end
   end
+rescue StandardError => e
+  logger.error(e)
 ensure
   stats.write
 end
