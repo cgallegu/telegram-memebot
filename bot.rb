@@ -22,38 +22,49 @@ def get_memes
 end
 
 class Stats
-  def initialize(file_name, logger)
-    @file_name = file_name
+  def initialize(file_map, logger)
+    @file_map = file_map
     @logger = logger
-    
+
     @stats = read() || Hash.new(0)
   end
 
   def read
-    if (File.exist?(@file_name))
-      @logger.info("Reading stats: #{@file_name}")
-      file = File.open(@file_name, 'r')
-      result = Marshal.load file.read
-      file.close
-      @logger.info("Read successfully, stats: #{result}")
-      result
-    end
+    result = {}
+    @file_map.each { |group, file_name|
+      if (File.exist?(file_name))
+        @logger.info("Reading stats for group #{group}: #{file_name}")
+        file = File.open(file_name, 'r')
+        stat_group = Marshal.load file.read
+        file.close
+        @logger.info("Read successfully, stats: #{stat_group}")
+        result[group] = stat_group
+      else
+        result[group] = Hash.new(0)
+      end
+    }
+    @stats = result
   end
 
   def write
-    @logger.info("Writing stats: #{@file_name}")
-    marshal_dump = Marshal.dump(@stats)
-    file = File.new(@file_name,'w')
-    file.write marshal_dump
-    file.close
+    @file_map.each  { |group, file_name|
+      @logger.info("Writing stats for group #{group}: #{file_name}")
+      marshal_dump = Marshal.dump(@stats[group])
+      file = File.new(file_name,'w')
+      file.write marshal_dump
+      file.close
+    }
   end
 
   def to_s
-    @stats.sort_by(&:last).reverse.to_h
+    result = @stats.map { |group, stats|
+      "#{group.to_s.gsub('_', ' ')}: #{stats.sort_by(&:last).reverse.to_h}"
+    }.join(", ")
+    result
   end
 
-  def inc(stat)
-    @stats[stat] = @stats[stat] + 1
+  def inc(group, stat)
+    @stats[group][stat] = @stats[group][stat] + 1
   end
 end
 
@@ -110,9 +121,8 @@ default_sources = [
   'r/softwaregore'
 ]
 
-requests_per_source_file = 'requests_per_source_v1'
 logger = Logger.new(STDOUT)
-stats = Stats.new(requests_per_source_file, logger)
+stats = Stats.new({ :requests_per_topic => 'requests_per_source_v1', :top_requesters => 'top_requesters_v1' }, logger)
 
 begin
   logger.info('Starting...')
@@ -124,13 +134,16 @@ begin
       when '/stop'
         bot.api.send_message(chat_id: message.chat.id, text: "Buenas noches a todos")
       when '/stats'
-        bot.api.send_message(chat_id: message.chat.id, text: "Stats: #{stats}")
+        bot.api.send_message(chat_id: message.chat.id, text: "#{stats}")
       end
       # TODO: Read commands properly from MessageEntities
       if message.text and message.text.start_with?('/meme')
         source = message.text.split(' ')[1] || default_sources.sample
+        if message.from
+          stats.inc(:top_requesters, "#{message.from.first_name} #{message.from.last_name || ''}")
+        end
         begin
-          stats.inc(source)
+          stats.inc(:requests_per_topic, source)
           meme = reddit.get_meme(source)
           if !meme
             logger.info('Meme not found, defaulting')
